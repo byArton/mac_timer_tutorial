@@ -4,10 +4,10 @@
 
 ## 1. リポジトリのクローン（ダウンロード）
 
-'''
+```
 git clone https://github.com/byArton/mac_timer_tutorial.git
 cd mac_timer_tutorial
-'''
+```
 
 ## 2. Xcode でプロジェクトを開く
 
