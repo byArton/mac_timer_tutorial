@@ -1,83 +1,113 @@
-//
-//  ContentView.swift
-//  time
-//
-//  Created by Arton on 2025/06/12.
-//
-
 import SwiftUI
-import CoreData
+import UserNotifications
 
 struct ContentView: View {
-    @Environment(\.managedObjectContext) private var viewContext
-
-    @FetchRequest(
-        sortDescriptors: [NSSortDescriptor(keyPath: \Item.timestamp, ascending: true)],
-        animation: .default)
-    private var items: FetchedResults<Item>
+    @State private var selectedTime = Date()
+    @State private var permissionGranted = false
+    @State private var showToast = false
+    @State private var timerSet = false
 
     var body: some View {
-        NavigationView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp!, formatter: itemFormatter)")
-                    } label: {
-                        Text(item.timestamp!, formatter: itemFormatter)
+        ZStack {
+            // すりガラス風背景
+            Color.clear
+                .background(.ultraThinMaterial)
+                .ignoresSafeArea()
+
+            VStack(spacing: 20) {
+                DatePicker("", selection: $selectedTime, displayedComponents: .hourAndMinute)
+                    .labelsHidden()
+                    .frame(width: 100)
+                    .disabled(timerSet)
+
+                Button(action: {
+                    if !timerSet {
+                        requestNotificationPermission {
+                            scheduleNotifications(for: selectedTime)
+                            withAnimation { showToast = true }
+                            timerSet = true
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                withAnimation { showToast = false }
+                            }
+                        }
+                    } else {
+                        // 完了ボタンが押されたとき、リセット
+                        timerSet = false
                     }
+                }) {
+                    Text(timerSet ? "完了" : "タイマーをセット")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 28)
+                        .padding(.vertical, 10)
+                        .background(
+                            LinearGradient(
+                                colors: timerSet ?
+                                    [Color.green, Color.green.opacity(0.7)] :
+                                    [Color.blue, Color.purple],
+                                startPoint: .leading, endPoint: .trailing
+                            )
+                        )
+                        .cornerRadius(12)
+                        .shadow(radius: 6)
                 }
-                .onDelete(perform: deleteItems)
+                .buttonStyle(PlainButtonStyle())
+                // .disabled(timerSet) ← 無効化は削除
+
             }
-            .toolbar {
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
+            .padding(20)
+
+            // トースト通知
+            if showToast {
+                VStack {
+                    Spacer()
+                    Text("通知をセットしました")
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 10)
+                        .background(.ultraThinMaterial)
+                        .cornerRadius(12)
+                        .shadow(radius: 8)
+                        .padding(.bottom, 20)
                 }
-            }
-            Text("Select an item")
-        }
-    }
-
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(context: viewContext)
-            newItem.timestamp = Date()
-
-            do {
-                try viewContext.save()
-            } catch {
-                // Replace this implementation with code to handle the error appropriately.
-                // fatalError() causes the application to generate a crash log and terminate. You should not use this function in a shipping application, although it may be useful during development.
-                let nsError = error as NSError
-                fatalError("Unresolved error \(nsError), \(nsError.userInfo)")
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            offsets.map { items[$0] }.forEach(viewContext.delete)
+    func timeString(from date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: date)
+    }
 
-            do {
-                try viewContext.save()
-            } catch {
-                // Replace this implementation with code to handle the error appropriately.
-                // fatalError() causes the application to generate a crash log and terminate. You should not use this function in a shipping application, although it may be useful during development.
-                let nsError = error as NSError
-                fatalError("Unresolved error \(nsError), \(nsError.userInfo)")
+    func requestNotificationPermission(completion: @escaping () -> Void) {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            permissionGranted = granted
+            if granted {
+                completion()
             }
         }
     }
-}
 
-private let itemFormatter: DateFormatter = {
-    let formatter = DateFormatter()
-    formatter.dateStyle = .short
-    formatter.timeStyle = .medium
-    return formatter
-}()
+    func scheduleNotifications(for date: Date) {
+        let center = UNUserNotificationCenter.current()
+        center.removeAllPendingNotificationRequests()
+        if let fiveMinutesBefore = Calendar.current.date(byAdding: .minute, value: -5, to: date) {
+            scheduleNotification(at: fiveMinutesBefore, title: "あと5分です", body: "指定した時間まで残り5分です。")
+        }
+        scheduleNotification(at: date, title: "タイマー終了", body: "指定した時間になりました。")
+    }
 
-#Preview {
-    ContentView().environment(\.managedObjectContext, PersistenceController.preview.container.viewContext)
+    func scheduleNotification(at date: Date, title: String, body: String) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+
+        let triggerDate = Calendar.current.dateComponents([.year,.month,.day,.hour,.minute,.second], from: date)
+        let trigger = UNCalendarNotificationTrigger(dateMatching: triggerDate, repeats: false)
+
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: trigger)
+        UNUserNotificationCenter.current().add(request)
+    }
 }
